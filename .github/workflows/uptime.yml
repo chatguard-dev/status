@@ -1,0 +1,57 @@
+name: Uptime
+
+# Probes the public endpoints every five minutes (probe.sh). A new outage opens an issue labelled
+# "incident" and fails the run, which is what triggers GitHub's e-mail to the repository owner;
+# while the issue is open further failures stay quiet, and recovery closes the issue.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe
+        run: ./probe.sh
+
+      - name: Incident bookkeeping
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --label incident --state open --json number,createdAt --jq '.[0] | "\(.number) \(.createdAt)"' || true)
+          number=${open%% *}
+          now=$(date -u +"%Y-%m-%d %H:%M UTC")
+          if [ -s failures.txt ]; then
+            if [ -z "$number" ]; then
+              names=$(cut -d'|' -f1 failures.txt | sed 's/ *$//' | paste -sd ',' - | sed 's/,/, /g')
+              {
+                echo "Detected at $now by the uptime workflow (run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+                echo
+                echo '| Target | URL | Detail |'
+                echo '|---|---|---|'
+                sed 's/^\(.*\) | \(.*\) | \(.*\)$/| \1 | \2 | \3 |/' failures.txt
+                echo
+                echo "This issue closes itself when every target answers again."
+              } > body.md
+              gh issue create -R "$GITHUB_REPOSITORY" --title "Outage: $names" --label incident --body-file body.md
+              echo "::error::New outage: $names"
+              exit 1
+            fi
+            echo "Incident #$number is still open; nothing new to report."
+          elif [ -n "$number" ]; then
+            since=${open#* }
+            gh issue comment -R "$GITHUB_REPOSITORY" "$number" --body "Recovered at $now. Every target answers again (down since $since)."
+            gh issue close -R "$GITHUB_REPOSITORY" "$number" --reason completed
+          fi
