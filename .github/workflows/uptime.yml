@@ -30,7 +30,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          open=$(gh issue list -R "$GITHUB_REPOSITORY" --label incident --state open --json number,createdAt --jq '.[0] | "\(.number) \(.createdAt)"' || true)
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --label incident --state open --json number,createdAt --jq 'if length == 0 then empty else "\(.[0].number) \(.[0].createdAt)" end' || true)
           number=${open%% *}
           now=$(date -u +"%Y-%m-%d %H:%M UTC")
           if [ -s failures.txt ]; then
