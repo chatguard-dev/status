@@ -1,8 +1,9 @@
 name: Uptime
 
-# Probes the public endpoints every five minutes (probe.sh). A new outage opens an issue labelled
-# "incident" and fails the run, which is what triggers GitHub's e-mail to the repository owner;
-# while the issue is open further failures stay quiet, and recovery closes the issue.
+# Probes the public endpoints (probe.sh) as the backup to the external monitor. The cron asks for a
+# run every 5 minutes, but GitHub starts scheduled runs best effort, often hours apart. A new outage
+# opens an issue labelled "incident" and fails the run, which is what triggers GitHub's e-mail to the
+# repository owner; while the issue is open further failures stay quiet, and recovery closes the issue.
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -18,7 +19,9 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Room for the worst case, every target timing out on all three attempts (about 13 minutes), so
+    # the incident step still runs when everything is down.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

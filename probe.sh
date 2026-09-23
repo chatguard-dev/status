@@ -6,24 +6,41 @@ set -u
 FAILURES=failures.txt
 : > "$FAILURES"
 
-# name | url | expected status | text that must appear in the body (empty = any)
+# name | url | expected status | text that must appear in the body, or for a redirect the exact
+# address it must point to (empty = any). Redirects are not followed.
 TARGETS=(
   "api readiness|https://api.chatguard.dev/readyz|200|"
   "api contract|https://api.chatguard.dev/openapi/v1.json|200|openapi"
   "dashboard|https://app.chatguard.dev/sign-in|200|Chat Guard"
   "landing page|https://chatguard.dev/|200|Chat Guard"
+  "www redirect|https://www.chatguard.dev/|308|https://chatguard.dev/"
+  # The invite the site's /discord link sends people to; change it here when the invite changes.
+  "discord link|https://chatguard.dev/discord|307|https://discord.gg/udtGVvXsRE"
+  "terms|https://chatguard.dev/terms|200|Terms of service"
+  "privacy notes|https://chatguard.dev/privacy|200|Privacy notes"
+  "dpa|https://chatguard.dev/dpa|200|Data processing agreement"
 )
 ATTEMPTS=3
 PAUSE=20
 
 probe() {
-  local url=$1 expected=$2 needle=$3 body code
+  local url=$1 expected=$2 needle=$3 body code location
   body=$(mktemp)
-  code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 15 -A "chatguard-uptime/1" "$url" 2>/dev/null || echo 000)
+  # curl prints 000 as the status when it gets no answer at all.
+  read -r code location <<< "$(curl -sS -o "$body" -w '%{http_code} %{redirect_url}' --max-time 15 -A "chatguard-uptime/1" "$url" 2>/dev/null)"
+  code=${code:-000}
   if [[ "$code" != "$expected" ]]; then
     rm -f "$body"
     echo "HTTP $code (expected $expected)"
     return 1
+  fi
+  if [[ "$code" == 3* ]]; then
+    rm -f "$body"
+    if [[ -n "$needle" && "$location" != "$needle" ]]; then
+      echo "HTTP $code to ${location:-no address} (expected $needle)"
+      return 1
+    fi
+    return 0
   fi
   if [[ -n "$needle" ]] && ! grep -q -- "$needle" "$body"; then
     rm -f "$body"
@@ -54,7 +71,7 @@ for target in "${TARGETS[@]}"; do
 done
 
 # TLS: fail when a certificate has fewer than 10 days left (Fly renews them well before that).
-for host in api.chatguard.dev app.chatguard.dev chatguard.dev; do
+for host in api.chatguard.dev app.chatguard.dev chatguard.dev www.chatguard.dev; do
   end=$(echo | openssl s_client -servername "$host" -connect "$host:443" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
   if [[ -z "$end" ]]; then
     echo "DOWN  tls $host: no certificate presented"
